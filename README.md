@@ -46,7 +46,7 @@ let mut stream = model.stream("en", "en", stream_cfg)?;
 ## Features
 
 - `ort-defaults` (default): Enable ONNX Runtime default features.
-- Execution providers (🚧 Mostly untested): `cuda`, `tensorrt`, `coreml`, `directml`, `rocm`, `openvino`, `webgpu`, `nnapi`.
+- Execution providers: `cpu` (default and always available), `cuda`, `coreml` (Apple Metal/Neural Engine), and `webgpu`. Enable at most one accelerator feature at a time.
 - Dynamic loading: `load-dynamic`, `preload-dylibs` (see `ort` docs).
 
 ## Examples
@@ -58,17 +58,25 @@ See the `examples` directory for more usage examples, including live microphone 
 cargo run --example live
 ```
 
-You can provide an environment variable called `CANARY_EXECUTION_PROVIDER` with the matching feature flag to select an execution provider. For example, to use CUDA:
+Select an accelerator at build time with one feature flag. CPU remains available as a fallback. For example, to use CUDA:
 
 ```bash
-CANARY_EXECUTION_PROVIDER=cuda CANARY_CUDA_DEVICE_ID=1 cargo run --example transcribe --features cuda
+CANARY_CUDA_DEVICE_ID=1 cargo run --example transcribe --features cuda
 ```
 
-Or to use CoreML with Neural Engine + low precision:
+To use CoreML with Neural Engine + low precision:
 
 ```bash
-CANARY_EXECUTION_PROVIDER=coreml CANARY_COREML_LOW_PRECISION=1 cargo run --example live --features coreml
+CANARY_COREML_LOW_PRECISION=1 cargo run --example live --features coreml
 ```
+
+To use WebGPU:
+
+```bash
+cargo run --example transcribe --features webgpu
+```
+
+If no accelerator feature is enabled, CPU is selected. The `cpu` feature is always compatible with accelerator features.
 
 ## Logging
 

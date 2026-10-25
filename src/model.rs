@@ -8,20 +8,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Execution provider configuration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecutionProvider {
-    Cpu,
-    Cuda,
-    TensorRT,
-    CoreML,
-    DirectML,
-    ROCm,
-    OpenVINO,
-    WebGPU,
-    NNAPI,
-}
-
 /// Configuration for session-level decoding and debug options.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -83,8 +69,6 @@ impl SessionConfig {
 /// Configuration for model execution
 #[derive(Debug, Clone)]
 pub struct ExecutionConfig {
-    /// Execution provider to use for the model sessions.
-    pub execution_provider: ExecutionProvider,
     /// Number of inter-op threads for ORT.
     pub inter_threads: usize,
     /// Number of intra-op threads for ORT.
@@ -99,22 +83,21 @@ pub struct ExecutionConfig {
     pub disable_ort_prepack: bool,
     /// Enable verbose ORT logging.
     pub ort_verbose: bool,
-    /// Optional CoreML model cache directory.
+    #[cfg(feature = "coreml")]
     pub coreml_cache_dir: Option<String>,
-    /// Which compute unit(s) to use for CoreML (if applicable).
-    /// Defaults to `CPUAndNeuralEngine`.
+    #[cfg(feature = "coreml")]
     pub coreml_compute_units: Option<ort::ep::coreml::ComputeUnits>,
-    /// Use low precision data (float16 instead of float32) to accumulate in CoreML.
+    #[cfg(feature = "coreml")]
     pub coreml_low_precision: bool,
-    /// Preferred CoreML model format (NeuralNetwork or MLProgram).
+    #[cfg(feature = "coreml")]
     pub coreml_model_format: Option<ort::ep::coreml::ModelFormat>,
-    /// Only allow CoreML to take nodes with static input shapes.
+    #[cfg(feature = "coreml")]
     pub coreml_static_input_shapes: bool,
-    /// Enable CoreML execution on subgraphs within control-flow operators.
+    #[cfg(feature = "coreml")]
     pub coreml_enable_subgraphs: bool,
-    /// CoreML specialization strategy (e.g. FastPrediction).
+    #[cfg(feature = "coreml")]
     pub coreml_specialization_strategy: Option<ort::ep::coreml::SpecializationStrategy>,
-    /// CUDA/TensorRT device index (default: 0).
+    #[cfg(feature = "cuda")]
     pub cuda_device_id: i32,
     /// Decoder/session runtime options.
     pub session: SessionConfig,
@@ -123,7 +106,6 @@ pub struct ExecutionConfig {
 impl ExecutionConfig {
     pub fn new() -> Self {
         Self {
-            execution_provider: ExecutionProvider::Cpu,
             inter_threads: 1,
             intra_threads: 4,
             use_ort_default_options: false,
@@ -131,21 +113,24 @@ impl ExecutionConfig {
             skip_ort_threads: false,
             disable_ort_prepack: false,
             ort_verbose: false,
+            #[cfg(feature = "coreml")]
             coreml_cache_dir: None,
+            #[cfg(feature = "coreml")]
             coreml_compute_units: None,
+            #[cfg(feature = "coreml")]
             coreml_low_precision: false,
+            #[cfg(feature = "coreml")]
             coreml_model_format: None,
+            #[cfg(feature = "coreml")]
             coreml_static_input_shapes: false,
+            #[cfg(feature = "coreml")]
             coreml_enable_subgraphs: false,
+            #[cfg(feature = "coreml")]
             coreml_specialization_strategy: None,
+            #[cfg(feature = "cuda")]
             cuda_device_id: 0,
             session: SessionConfig::default(),
         }
-    }
-
-    pub fn with_execution_provider(mut self, provider: ExecutionProvider) -> Self {
-        self.execution_provider = provider;
-        self
     }
 
     pub fn with_threads(mut self, inter: usize, intra: usize) -> Self {
@@ -154,11 +139,13 @@ impl ExecutionConfig {
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_cache_dir(mut self, dir: impl Into<String>) -> Self {
         self.coreml_cache_dir = Some(dir.into());
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_compute_units(
         mut self,
         compute_units: ort::ep::coreml::ComputeUnits,
@@ -167,26 +154,31 @@ impl ExecutionConfig {
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_low_precision(mut self, low_precision: bool) -> Self {
         self.coreml_low_precision = low_precision;
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_model_format(mut self, model_format: ort::ep::coreml::ModelFormat) -> Self {
         self.coreml_model_format = Some(model_format);
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_static_input_shapes(mut self, enable: bool) -> Self {
         self.coreml_static_input_shapes = enable;
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_enable_subgraphs(mut self, enable: bool) -> Self {
         self.coreml_enable_subgraphs = enable;
         self
     }
 
+    #[cfg(feature = "coreml")]
     pub fn with_coreml_specialization_strategy(
         mut self,
         strategy: ort::ep::coreml::SpecializationStrategy,
@@ -195,6 +187,7 @@ impl ExecutionConfig {
         self
     }
 
+    #[cfg(feature = "cuda")]
     pub fn with_cuda_device_id(mut self, device_id: i32) -> Self {
         self.cuda_device_id = device_id;
         self
@@ -282,17 +275,16 @@ impl Canary {
             .collect();
 
         // Create ONNX sessions
-        let encoder = Arc::new(Mutex::new(Self::create_session(&encoder_path, &config)?));
-        let decoder_config = match config.execution_provider {
-            ExecutionProvider::CoreML => ExecutionConfig {
-                execution_provider: ExecutionProvider::Cpu,
-                ..config.clone()
-            },
-            _ => config.clone(),
-        };
+        let encoder = Arc::new(Mutex::new(Self::create_session(
+            &encoder_path,
+            &config,
+            false,
+        )?));
+        let decoder_uses_cpu = cfg!(feature = "coreml");
         let decoder = Arc::new(Mutex::new(Self::create_session(
             &decoder_path,
-            &decoder_config,
+            &config,
+            decoder_uses_cpu,
         )?));
 
         Ok(Self {
@@ -405,7 +397,11 @@ impl Canary {
         )))
     }
 
-    fn create_session(path: &Path, config: &ExecutionConfig) -> Result<Session> {
+    fn create_session(
+        path: &Path,
+        config: &ExecutionConfig,
+        use_cpu_provider: bool,
+    ) -> Result<Session> {
         let mut builder = Session::builder()?;
 
         if !config.use_ort_default_options {
@@ -455,8 +451,8 @@ impl Canary {
                 .with_log_verbosity(4)?;
         }
 
-        builder = execution::apply_execution_providers(builder, config)?;
-        builder = Self::attach_external_initializers(builder, path, config)?;
+        builder = execution::apply_execution_providers(builder, config, use_cpu_provider)?;
+        builder = Self::attach_external_initializers(builder, path)?;
 
         Ok(builder.commit_from_file(path)?)
     }
@@ -464,12 +460,11 @@ impl Canary {
     fn attach_external_initializers(
         mut builder: ort::session::builder::SessionBuilder,
         model_path: &Path,
-        config: &ExecutionConfig,
     ) -> Result<ort::session::builder::SessionBuilder> {
-        let use_external_data = match config.execution_provider {
-            ExecutionProvider::CoreML => true,
-            _ => false,
-        };
+        #[cfg(feature = "coreml")]
+        let use_external_data = true;
+        #[cfg(not(feature = "coreml"))]
+        let use_external_data = false;
 
         if !use_external_data {
             return Ok(builder);
